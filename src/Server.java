@@ -10,6 +10,10 @@ public class Server {
 
     static private final String ERROR = "ERROR";
     static private final String OK = "OK";
+    static private final String LEFT = "LEFT  ";
+    static private final String JOINED = "JOINED ";
+    static private final String NEWNICK = "NEWNICK";
+    static private final String MESSAGE = "MESSAGE ";
     static private final String BYE = "BYE";
 
     // A pre-allocated buffer for the received data
@@ -135,12 +139,7 @@ public class Server {
         }
     }
 
-
-    // Sends individual response to users
-    static private void sendResponseSc(SocketChannel sc, String message) {
-
-        byte[] info = (message).getBytes();
-        ByteBuffer buffer = ByteBuffer.wrap(info);
+    static private void writeInSocket(SocketChannel sc, ByteBuffer buffer) {
         while (buffer.hasRemaining()) {
             try {
                 sc.write(buffer);
@@ -151,46 +150,98 @@ public class Server {
         }
     }
 
+    //Send info to all users in the same room
+    static private void sendResponseRoom(SocketChannel sc, String message) {
+        String room = users.get(sc).getRoom();
+        String nick = users.get(sc).getNick();
+
+        byte[] info = (message).getBytes();
+        ByteBuffer buffer = ByteBuffer.wrap(info);
+
+        for (Map.Entry<SocketChannel, User> set : users.entrySet()) {
+            SocketChannel scOther = set.getKey();
+            User u = set.getValue();
+            if (u.getNick().equals(nick)) continue;
+            if (u.getRoom().equals(room)) {
+                buffer.rewind();
+                writeInSocket(scOther, buffer);
+            }
+        }
+    }
+
+    // Sends individual response to users
+    static private void sendResponseSc(SocketChannel sc, String message) {
+        byte[] info = (message).getBytes();
+        ByteBuffer buffer = ByteBuffer.wrap(info);
+        writeInSocket(sc, buffer);
+    }
+
     //Check the availability of the username inserted
     static private boolean nickAvailable(String nick) {
         for (Map.Entry<SocketChannel, User> set :
                 users.entrySet()) {
-            // Printing all elements of a Map
             if (set.getValue().getNick().equals(nick)) return false;
         }
         return true;
     }
 
+/*    static private boolean roomExists(String room) {
+        for (Map.Entry<SocketChannel, User> set: users.entrySet()) {
+            if(set.getValue().getRoom().equals(room)) return true;
+        }
+        return false;
+    }*/
+
     // Process the command
     static private void processCommand(String command, SocketChannel sc) {
 
+        String name = users.get(sc).getNick();
+        String state = users.get(sc).getState();
 
         String[] args = command.split(" ");
-        if (args.length == 1 || args[1].equals("")) return;
-
         String cmd = args[0];
-        String value = args[1];
-
 
         switch (cmd) {
-            case "nick":
-                if (nickAvailable(value)) {
-                    users.get(sc).setNick(value);
-                    users.get(sc);
-                    if(users.get(sc).getState().equals(User.INIT))
-                        users.get(sc).setStateOutside();
-                    if(users.get(sc).getState().equals(User.INSIDE)) {
-                        // Send message to all NEW_NICK nome_antigo nome
-                        // ...
+            case "nick" -> {
+                if (!(args.length == 1 || args[1].equals(""))) {
+                    String newNick = args[1];
+                    if (nickAvailable(newNick)) {
+                        users.get(sc).setNick(newNick);
+                        users.get(sc);
+                        if (state.equals(User.INIT))
+                            users.get(sc).setStateOutside();
+                        if (state.equals(User.INSIDE)) {
+                            sendResponseRoom(sc, NEWNICK + name + " " + newNick);
+                        }
+                        sendResponseSc(sc, OK);
+                        return;
                     }
-                    sendResponseSc(sc,OK);
                 }
-                else sendResponseSc(sc, ERROR);
-                break;
-            case "bye":
+            }
+            case "join" -> {
+                if (!(args.length == 1 || args[1].equals(""))) {
+                    String room = args[1];
+                    if(state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name);
+                    users.get(sc).setRoom(room);
+                    sendResponseSc(sc, OK);
+                    sendResponseRoom(sc, JOINED + name);
+                    return;
+                }
+            }
+            case "leave" -> {
+                if(state.equals(User.INSIDE)) {
+                    sendResponseSc(sc, OK);
+                    sendResponseRoom(sc, LEFT + name);
+                    users.get(sc).setRoom("");
+                    users.get(sc).setStateOutside();
+                }
+            }
+            case "bye" -> {
+                if (state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name);
                 sendResponseSc(sc, BYE);
-                break;
+            }
         }
+        sendResponseSc(sc, ERROR);
     }
 
     // Just read the message from the socket and send it to stdout
@@ -207,7 +258,6 @@ public class Server {
 
         // Decode and print the message to stdout
         String message = decoder.decode(buffer).toString();
-        Boolean valid = false;
         if (message.charAt(0) == '/')
             processCommand(message.substring(1), sc);
 
