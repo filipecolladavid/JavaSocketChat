@@ -111,7 +111,11 @@ public class Server {
                                 Socket s = null;
                                 try {
                                     s = sc.socket();
-                                    System.out.println("Closing connection to " + s);
+                                    System.out.println(users.get(sc).getState());
+                                    if(users.get(sc).getState().equals(User.INSIDE))
+                                        sendResponseRoom(sc,LEFT+users.get(sc).getNick());
+                                    System.out.println("HEY: Closing connection to " + s);
+                                    users.remove(sc);
                                     s.close();
                                 } catch (IOException ie) {
                                     System.err.println("Error closing socket " + s + ": " + ie);
@@ -122,13 +126,15 @@ public class Server {
 
                             // On exception, remove this channel from the selector
                             key.cancel();
+                            if(users.get(sc).getState().equals(User.INSIDE))
+                                sendResponseRoom(sc,LEFT+users.get(sc).getNick());
+                            users.remove(sc);
 
                             try {
                                 sc.close();
                             } catch (IOException ie2) {
                                 System.out.println(ie2);
                             }
-
                             System.out.println("Closed " + sc);
                         }
                     }
@@ -219,6 +225,7 @@ public class Server {
                     String room = args[1];
                     if (state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name);
                     users.get(sc).setRoom(room);
+                    users.get(sc).setStateInside();
                     sendResponseSc(sc, OK);
                     sendResponseRoom(sc, JOINED + name);
                     return;
@@ -249,11 +256,11 @@ public class Server {
 
         while (buffer.hasRemaining()) { // loop until the buffer is empty
             byte b = buffer.get(); // get the next byte from the buffer
-            System.out.println((char)b+":"+b);
-            if (b == 10) { // check if the byte is the ASCII value for "ENTER"
+            // System.out.println((char)b+":"+b);
+            if (b == 10) {
                 // Decode and print the message to stdout
                 String message = sb.toString();
-                System.out.println(message);
+                // System.out.println(message);
                 if (message.charAt(0) == '/')
                     processCommand(message.substring(1), sc);
                 sb.setLength(0);
@@ -264,19 +271,9 @@ public class Server {
 
 
         // If no data, close the connection
-/*
         if (buffer.limit() == 0) {
             return false;
         }
-
-        // Decode and print the message to stdout
-        String message = decoder.decode(buffer).toString();
-        if (message.charAt(0) == '/')
-            processCommand(message.substring(1), sc);
-        else if(users.get(sc).getState().equals(User.INSIDE)) sendResponseRoom(sc, MESSAGE+users.get(sc).getNick()+message);
-*/
-
-        // System.out.print( message );
 
         return true;
 
