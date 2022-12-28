@@ -107,27 +107,15 @@ public class Server {
                             // and close it
                             if (!ok) {
                                 key.cancel();
-
-                                Socket s = null;
-                                try {
-                                    s = sc.socket();
-                                    System.out.println(users.get(sc).getState());
-                                    if(users.get(sc).getState().equals(User.INSIDE))
-                                        sendResponseRoom(sc,LEFT+users.get(sc).getNick());
-                                    System.out.println("HEY: Closing connection to " + s);
-                                    users.remove(sc);
-                                    s.close();
-                                } catch (IOException ie) {
-                                    System.err.println("Error closing socket " + s + ": " + ie);
-                                }
+                                terminateConnection(sc);
                             }
 
                         } catch (IOException ie) {
 
                             // On exception, remove this channel from the selector
                             key.cancel();
-                            if(users.get(sc).getState().equals(User.INSIDE))
-                                sendResponseRoom(sc,LEFT+users.get(sc).getNick());
+                            if (users.get(sc).getState().equals(User.INSIDE))
+                                sendResponseRoom(sc, LEFT + users.get(sc).getNick(), false);
                             users.remove(sc);
 
                             try {
@@ -148,6 +136,21 @@ public class Server {
         }
     }
 
+    static private void terminateConnection(SocketChannel sc) {
+        Socket s = null;
+        try {
+            s = sc.socket();
+            if (users.get(sc).getState().equals(User.INSIDE)) {
+                sendResponseRoom(sc, LEFT + users.get(sc).getNick(), false);
+            }
+            System.out.println("Closing connection to " + s);
+            users.remove(sc);
+            s.close();
+        } catch (IOException ie) {
+            System.err.println("Error closing socket " + s + ": " + ie);
+        }
+    }
+
     static private void writeInSocket(SocketChannel sc, ByteBuffer buffer) {
         while (buffer.hasRemaining()) {
             try {
@@ -160,17 +163,18 @@ public class Server {
     }
 
     //Send info to all users in the same room
-    static private void sendResponseRoom(SocketChannel sc, String message) {
+    static private void sendResponseRoom(SocketChannel sc, String message, Boolean self) {
         String room = users.get(sc).getRoom();
         String nick = users.get(sc).getNick();
 
-        byte[] info = (message).getBytes();
+        byte[] info = (message + "\n").getBytes();
         ByteBuffer buffer = ByteBuffer.wrap(info);
 
         for (Map.Entry<SocketChannel, User> set : users.entrySet()) {
             SocketChannel scOther = set.getKey();
             User u = set.getValue();
-            if (u.getNick().equals(nick)) continue;
+            //TODO - Confirm if user also receives message sent
+            if (!self && u.getNick().equals(nick)) continue;
             if (u.getRoom().equals(room)) {
                 buffer.rewind();
                 writeInSocket(scOther, buffer);
@@ -180,7 +184,7 @@ public class Server {
 
     // Sends individual response to users
     static private void sendResponseSc(SocketChannel sc, String message) {
-        byte[] info = (message).getBytes();
+        byte[] info = (message + "\n").getBytes();
         ByteBuffer buffer = ByteBuffer.wrap(info);
         writeInSocket(sc, buffer);
     }
@@ -195,7 +199,7 @@ public class Server {
     }
 
     // Process the command
-    static private void processCommand(String command, SocketChannel sc) {
+    static private void processCommand(SocketChannel sc, String command) {
 
         String name = users.get(sc).getNick();
         String state = users.get(sc).getState();
@@ -205,7 +209,7 @@ public class Server {
 
         switch (cmd) {
             case "nick" -> {
-                if (!(args.length == 1 || args[1].equals(""))) {
+                if (args.length == 2 && !args[1].equals("")) {
                     String newNick = args[1];
                     if (nickAvailable(newNick)) {
                         users.get(sc).setNick(newNick);
@@ -213,7 +217,7 @@ public class Server {
                         if (state.equals(User.INIT))
                             users.get(sc).setStateOutside();
                         if (state.equals(User.INSIDE)) {
-                            sendResponseRoom(sc, NEWNICK + name + " " + newNick);
+                            sendResponseRoom(sc, NEWNICK + name + " " + newNick, false);
                         }
                         sendResponseSc(sc, OK);
                         return;
@@ -221,27 +225,31 @@ public class Server {
                 }
             }
             case "join" -> {
-                if (!(args.length == 1 || args[1].equals(""))) {
+                if (args.length == 2 && !args[1].equals("") && !state.equals(User.INIT)) {
                     String room = args[1];
-                    if (state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name);
+                    if (state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name, false);
                     users.get(sc).setRoom(room);
                     users.get(sc).setStateInside();
                     sendResponseSc(sc, OK);
-                    sendResponseRoom(sc, JOINED + name);
+                    sendResponseRoom(sc, JOINED + name, false);
                     return;
                 }
             }
             case "leave" -> {
-                if (state.equals(User.INSIDE)) {
+                if (state.equals(User.INSIDE) && args.length == 1) {
                     sendResponseSc(sc, OK);
-                    sendResponseRoom(sc, LEFT + name);
+                    sendResponseRoom(sc, LEFT + name, false);
                     users.get(sc).setRoom("");
                     users.get(sc).setStateOutside();
+                    return;
                 }
             }
             case "bye" -> {
-                if (state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name);
-                sendResponseSc(sc, BYE);
+                if (args.length == 1) {
+                    sendResponseSc(sc, BYE);
+                    terminateConnection(sc);
+                    return;
+                }
             }
         }
         sendResponseSc(sc, ERROR);
@@ -253,28 +261,33 @@ public class Server {
         buffer.clear();
         sc.read(buffer);
         buffer.flip();
-
-        while (buffer.hasRemaining()) { // loop until the buffer is empty
-            byte b = buffer.get(); // get the next byte from the buffer
+        // TODO - client must have list of available commands and filter in case it's not
+        while (buffer.hasRemaining()) {
+            byte b = buffer.get();
             // System.out.println((char)b+":"+b);
             if (b == 10) {
-                // Decode and print the message to stdout
                 String message = sb.toString();
-                // System.out.println(message);
-                if (message.charAt(0) == '/')
-                    processCommand(message.substring(1), sc);
+                //Escape Mec
+                if (users.get(sc).getState().equals(User.INSIDE)) {
+                    if (message.charAt(0) == '/') {
+                        if (message.charAt(1) == '/')
+                            //Send group message
+                            sendResponseRoom(sc, MESSAGE + users.get(sc).getNick() + " " + message.substring(1), true);
+                        else
+                            processCommand(sc, message.substring(1));
+                    } else sendResponseRoom(sc, MESSAGE + users.get(sc).getNick() + " " + message, true);
+                } else if (message.charAt(0) == '/')
+                    processCommand(sc, message.substring(1));
+                else sendResponseSc(sc, ERROR);
                 sb.setLength(0);
-                continue; // exit the loop
+                continue;
             }
-            sb.append((char) b); // append the byte to the StringBuilder
+            sb.append((char) b);
         }
-
-
         // If no data, close the connection
         if (buffer.limit() == 0) {
             return false;
         }
-
         return true;
 
     }
