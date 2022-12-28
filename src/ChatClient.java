@@ -1,5 +1,9 @@
 import java.io.*;
 import java.net.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
 import java.util.*;
 import java.awt.*;
 import java.awt.event.*;
@@ -17,7 +21,16 @@ public class ChatClient {
     // Se for necessário adicionar variáveis ao objecto ChatClient, devem
     // ser colocadas aqui
 
+    static private final ByteBuffer inputB = ByteBuffer.allocate(16384);
+    static private final ByteBuffer outputB = ByteBuffer.allocate(16384);
 
+    static private SocketChannel sc = null;
+
+    // Decoder for incoming text -- assume UTF-8
+    static private final Charset charset = Charset.forName("UTF8");
+    static private final CharsetDecoder decoder = charset.newDecoder();
+
+    static private final Set<String> AVAILABLECMD = Set.of("join", "nick", "leave", "bye", "priv");
 
 
     // Método a usar para acrescentar uma string à caixa de texto
@@ -63,7 +76,11 @@ public class ChatClient {
         // Se for necessário adicionar código de inicialização ao
         // construtor, deve ser colocado aqui
 
+        Thread client = new Thread();
+        client.run();
 
+        InetSocketAddress isa = new InetSocketAddress(server, port);
+        sc = SocketChannel.open(isa);
 
     }
 
@@ -71,9 +88,28 @@ public class ChatClient {
     // Método invocado sempre que o utilizador insere uma mensagem
     // na caixa de entrada
     public void newMessage(String message) throws IOException {
+
         // PREENCHER AQUI com código que envia a mensagem ao servidor
 
 
+        if (message.charAt(0) == '/') {
+            if (message.charAt(1) == '/') {
+                message = "/" + message;
+            } else {
+                String[] parts = message.split(" ");
+                String cmd = parts[0].substring(1);
+                if(!AVAILABLECMD.contains(cmd)) message = "/"+message;
+            }
+        } message = message + "\n";
+
+        System.out.println(message);
+        outputB.clear();
+        outputB.put(message.getBytes());
+        outputB.flip();
+
+        while(outputB.hasRemaining()) {
+            sc.write(outputB);
+        }
 
     }
 
@@ -81,9 +117,33 @@ public class ChatClient {
     // Método principal do objecto
     public void run() throws IOException {
         // PREENCHER AQUI
+        while (true) {
+            inputB.clear();
+            sc.read(inputB);
+            inputB.flip();
 
+            String message = decoder.decode(inputB).toString();
+            String[] response = message.split(" ");
 
-
+            if (response[0].equals("JOINED") && response.length == 2) {
+                printMessage(response[1].trim() + " entrou na sala.\n");
+            }
+            else if (response[0].equals("LEFT") && response.length == 2) {
+                printMessage(response[1].trim() + " saiu da sala.\n");
+            }
+            else if (response[0].equals("NEWNICK") && response.length == 3) {
+                printMessage(response[1] + " mudou o nome para " + response[2]);
+            }
+            else if (response[0].equals("MESSAGE") && response.length > 2) {
+                printMessage(response[1] + ": " + message.substring(response[0].length()+response[1].length()+2));
+            }
+            else if (response[0].equals("PRIVATE") && response.length > 2) {
+                printMessage("Privada "+response[1] + ": " + message.substring(response[0].length()+response[1].length()+2));
+            }
+            else {
+                printMessage(message);
+            }
+        }
     }
 
 

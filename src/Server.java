@@ -175,7 +175,6 @@ public class Server {
         for (Map.Entry<SocketChannel, User> set : users.entrySet()) {
             SocketChannel scOther = set.getKey();
             User u = set.getValue();
-            //TODO - Confirm if user also receives message sent
             if (!self && u.getNick().equals(nick)) continue;
             if (u.getRoom().equals(room)) {
                 buffer.rewind();
@@ -206,7 +205,7 @@ public class Server {
                 users.entrySet()) {
             if (set.getValue().getNick().equals(receiver)) {
                 SocketChannel sReceiver = set.getKey();
-                byte[] info = (PRIVATE + sender +" " + message + "\n").getBytes();
+                byte[] info = (PRIVATE + sender +" "+ message + "\n").getBytes();
                 ByteBuffer buffer = ByteBuffer.wrap(info);
                 writeInSocket(sReceiver, buffer);
                 return true;
