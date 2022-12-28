@@ -19,6 +19,9 @@ public class Server {
     // A pre-allocated buffer for the received data
     static private final ByteBuffer buffer = ByteBuffer.allocate(16384);
 
+    // String builder for separate packages
+    static private StringBuilder sb = new StringBuilder();
+
     // Decoder for incoming text -- assume UTF-8
     static private final Charset charset = StandardCharsets.UTF_8;
     static private final CharsetDecoder decoder = charset.newDecoder();
@@ -185,13 +188,6 @@ public class Server {
         return true;
     }
 
-/*    static private boolean roomExists(String room) {
-        for (Map.Entry<SocketChannel, User> set: users.entrySet()) {
-            if(set.getValue().getRoom().equals(room)) return true;
-        }
-        return false;
-    }*/
-
     // Process the command
     static private void processCommand(String command, SocketChannel sc) {
 
@@ -221,7 +217,7 @@ public class Server {
             case "join" -> {
                 if (!(args.length == 1 || args[1].equals(""))) {
                     String room = args[1];
-                    if(state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name);
+                    if (state.equals(User.INSIDE)) sendResponseRoom(sc, LEFT + name);
                     users.get(sc).setRoom(room);
                     sendResponseSc(sc, OK);
                     sendResponseRoom(sc, JOINED + name);
@@ -229,7 +225,7 @@ public class Server {
                 }
             }
             case "leave" -> {
-                if(state.equals(User.INSIDE)) {
+                if (state.equals(User.INSIDE)) {
                     sendResponseSc(sc, OK);
                     sendResponseRoom(sc, LEFT + name);
                     users.get(sc).setRoom("");
@@ -251,7 +247,24 @@ public class Server {
         sc.read(buffer);
         buffer.flip();
 
+        while (buffer.hasRemaining()) { // loop until the buffer is empty
+            byte b = buffer.get(); // get the next byte from the buffer
+            System.out.println((char)b+":"+b);
+            if (b == 10) { // check if the byte is the ASCII value for "ENTER"
+                // Decode and print the message to stdout
+                String message = sb.toString();
+                System.out.println(message);
+                if (message.charAt(0) == '/')
+                    processCommand(message.substring(1), sc);
+                sb.setLength(0);
+                continue; // exit the loop
+            }
+            sb.append((char) b); // append the byte to the StringBuilder
+        }
+
+
         // If no data, close the connection
+/*
         if (buffer.limit() == 0) {
             return false;
         }
@@ -260,9 +273,12 @@ public class Server {
         String message = decoder.decode(buffer).toString();
         if (message.charAt(0) == '/')
             processCommand(message.substring(1), sc);
+        else if(users.get(sc).getState().equals(User.INSIDE)) sendResponseRoom(sc, MESSAGE+users.get(sc).getNick()+message);
+*/
 
         // System.out.print( message );
 
         return true;
+
     }
 }
