@@ -10,11 +10,13 @@ public class Server {
 
     static private final String ERROR = "ERROR";
     static private final String OK = "OK";
-    static private final String LEFT = "LEFT  ";
+    static private final String LEFT = "LEFT ";
     static private final String JOINED = "JOINED ";
-    static private final String NEWNICK = "NEWNICK";
+    static private final String NEWNICK = "NEWNICK ";
     static private final String MESSAGE = "MESSAGE ";
     static private final String BYE = "BYE";
+
+    static private final String PRIVATE = "PRIVATE ";
 
     // A pre-allocated buffer for the received data
     static private final ByteBuffer buffer = ByteBuffer.allocate(16384);
@@ -198,6 +200,20 @@ public class Server {
         return true;
     }
 
+    static private boolean sendPrivMessage(String sender, String receiver, String message) {
+
+        for (Map.Entry<SocketChannel, User> set :
+                users.entrySet()) {
+            if (set.getValue().getNick().equals(receiver)) {
+                SocketChannel sReceiver = set.getKey();
+                byte[] info = (PRIVATE + sender +" " + message + "\n").getBytes();
+                ByteBuffer buffer = ByteBuffer.wrap(info);
+                writeInSocket(sReceiver, buffer);
+                return true;
+            }
+        }
+        return false;
+    }
     // Process the command
     static private void processCommand(SocketChannel sc, String command) {
 
@@ -249,6 +265,14 @@ public class Server {
                     sendResponseSc(sc, BYE);
                     terminateConnection(sc);
                     return;
+                }
+            }
+
+            case "priv" -> {
+                if(args.length >= 3) {
+                    String receiver = args[1];
+                    String message = command.substring(command.indexOf(args[2]));
+                    if(sendPrivMessage(name, receiver, message))return;
                 }
             }
         }
